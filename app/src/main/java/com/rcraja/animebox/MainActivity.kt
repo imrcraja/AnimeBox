@@ -360,13 +360,10 @@ private fun VideoPlayerScreen(anime: Anime, onBack: () -> Unit) {
     val context = LocalContext.current
     var mediaUrl by remember(anime.title) { mutableStateOf("") }
     var playbackMessage by remember(anime.title) { mutableStateOf("Paste a direct video URL that you own or are authorized to stream.") }
-    var player by remember { mutableStateOf<ExoPlayer?>(null) }
+    val exoPlayer = remember(anime.title) { ExoPlayer.Builder(context).build() }
 
-    DisposableEffect(Unit) {
-        onDispose {
-            player?.release()
-            player = null
-        }
+    DisposableEffect(exoPlayer) {
+        onDispose { exoPlayer.release() }
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -379,10 +376,10 @@ private fun VideoPlayerScreen(anime: Anime, onBack: () -> Unit) {
                 factory = { viewContext ->
                     PlayerView(viewContext).apply {
                         useController = true
-                        player = ExoPlayer.Builder(viewContext).build().also { this.player = it }
+                        player = exoPlayer
                     }
                 },
-                update = { view -> if (view.player !== player) view.player = player }
+                update = { view -> if (view.player !== exoPlayer) view.player = exoPlayer }
             )
         }
         Spacer(Modifier.height(14.dp))
@@ -401,10 +398,9 @@ private fun VideoPlayerScreen(anime: Anime, onBack: () -> Unit) {
                 playbackMessage = "Enter a valid HTTP(S) video URL first."
             } else {
                 try {
-                    val activePlayer = player ?: ExoPlayer.Builder(context).build().also { player = it }
-                    activePlayer.setMediaItem(MediaItem.fromUri(url))
-                    activePlayer.prepare()
-                    activePlayer.playWhenReady = true
+                    exoPlayer.setMediaItem(MediaItem.fromUri(url))
+                    exoPlayer.prepare()
+                    exoPlayer.playWhenReady = true
                     playbackMessage = "Loading video… If it fails, check the URL and media format."
                 } catch (e: Exception) {
                     playbackMessage = "Could not start playback. Check the video URL and try again."
