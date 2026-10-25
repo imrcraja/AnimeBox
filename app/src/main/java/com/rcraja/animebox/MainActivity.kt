@@ -20,6 +20,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.DisposableEffect
 
 private val Bg = Color(0xFF080D0B)
 private val Panel = Color(0xFF151D19)
@@ -51,6 +57,7 @@ private fun AnimeBoxApp() {
     var query by remember { mutableStateOf("") }
     var selectedPlan by remember { mutableStateOf("Free") }
     var selectedAnime by remember { mutableStateOf<Anime?>(null) }
+    var playerAnime by remember { mutableStateOf<Anime?>(null) }
     var queue by remember { mutableStateOf(listOf<String>()) }
     var supportText by remember { mutableStateOf("") }
     var ticketMessage by remember { mutableStateOf("") }
@@ -110,8 +117,10 @@ private fun AnimeBoxApp() {
                     }
                 }
 
-                if (selectedAnime != null) {
-                    AnimeDetails(selectedAnime!!, onBack = { selectedAnime = null }, onQueue = {
+                if (playerAnime != null) {
+                    VideoPlayerScreen(anime = playerAnime!!, onBack = { playerAnime = null })
+                } else if (selectedAnime != null) {
+                    AnimeDetails(selectedAnime!!, onBack = { selectedAnime = null }, onPlay = { playerAnime = selectedAnime }, onQueue = {
                         val limit = when (selectedPlan) { "Gold" -> 5; "Silver" -> 3; else -> 1 }
                         if (queue.size < limit && !queue.contains(selectedAnime!!.title)) {
                             queue = queue + selectedAnime!!.title
@@ -152,8 +161,7 @@ private fun HomeScreen(query: String, onQuery: (String) -> Unit, anime: List<Ani
                 Column(Modifier.fillMaxWidth().padding(22.dp)) {
                     Text("DISCOVER YOUR NEXT WATCH", color = Green, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
                     Spacer(Modifier.height(10.dp))
-                    Text("Stories worth
-staying up for.", color = White, fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Stories worth staying up for.", color = White, fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(8.dp))
                     Text("Explore new worlds, one episode at a time.", color = Muted)
                     Spacer(Modifier.height(16.dp))
@@ -220,7 +228,7 @@ private fun AnimeCard(anime: Anime, onClick: () -> Unit) {
 }
 
 @Composable
-private fun AnimeDetails(anime: Anime, onBack: () -> Unit, onQueue: () -> Unit, message: String) {
+private fun AnimeDetails(anime: Anime, onBack: () -> Unit, onPlay: () -> Unit, onQueue: () -> Unit, message: String) {
     Column(Modifier.fillMaxSize().padding(18.dp)) {
         TextButton(onClick = onBack) { Text("← Back to catalogue", color = Green) }
         Spacer(Modifier.height(8.dp))
@@ -235,7 +243,9 @@ private fun AnimeDetails(anime: Anime, onBack: () -> Unit, onQueue: () -> Unit, 
         Spacer(Modifier.height(12.dp))
         Text("Sample anime details. Official episode sources, playback and subtitles will be connected in a later phase.", color = Muted)
         Spacer(Modifier.height(20.dp))
-        Button(onClick = onQueue, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Download, null); Text("Add episode to demo queue") }
+        Button(onClick = onPlay, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(8.dp)); Text("Open video player") }
+        Spacer(Modifier.height(10.dp))
+        OutlinedButton(onClick = onQueue, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text("Add to demo download queue") }
         if (message.isNotBlank()) Text(message, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
     }
 }
@@ -341,5 +351,67 @@ private fun SectionTitle(title: String, subtitle: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text(title, fontSize = 21.sp, fontWeight = FontWeight.Bold)
         Text(subtitle, color = Muted, fontSize = 9.sp)
+    }
+}
+
+
+@Composable
+private fun VideoPlayerScreen(anime: Anime, onBack: () -> Unit) {
+    val context = LocalContext.current
+    var mediaUrl by remember(anime.title) { mutableStateOf("") }
+    var playbackMessage by remember(anime.title) { mutableStateOf("Paste a direct video URL that you own or are authorized to stream.") }
+    var player by remember { mutableStateOf<ExoPlayer?>(null) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            player?.release()
+            player = null
+        }
+    }
+
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        TextButton(onClick = onBack) { Text("← Back to details", color = Green) }
+        Text(anime.title, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+        Text("Video player · authorized sources only", color = Muted, fontSize = 12.sp)
+        Spacer(Modifier.height(14.dp))
+        Surface(color = Color.Black, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().height(220.dp)) {
+            AndroidView(
+                factory = { viewContext ->
+                    PlayerView(viewContext).apply {
+                        useController = true
+                        player = ExoPlayer.Builder(viewContext).build().also { this.player = it }
+                    }
+                },
+                update = { view -> if (view.player !== player) view.player = player }
+            )
+        }
+        Spacer(Modifier.height(14.dp))
+        OutlinedTextField(
+            value = mediaUrl,
+            onValueChange = { mediaUrl = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Direct video URL") },
+            placeholder = { Text("https://your-authorized-host/video.mp4") },
+            singleLine = true
+        )
+        Spacer(Modifier.height(10.dp))
+        Button(onClick = {
+            val url = mediaUrl.trim()
+            if (!(url.startsWith("https://") || url.startsWith("http://"))) {
+                playbackMessage = "Enter a valid HTTP(S) video URL first."
+            } else {
+                try {
+                    val activePlayer = player ?: ExoPlayer.Builder(context).build().also { player = it }
+                    activePlayer.setMediaItem(MediaItem.fromUri(url))
+                    activePlayer.prepare()
+                    activePlayer.playWhenReady = true
+                    playbackMessage = "Loading video… If it fails, check the URL and media format."
+                } catch (e: Exception) {
+                    playbackMessage = "Could not start playback. Check the video URL and try again."
+                }
+            }
+        }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(8.dp)); Text("Load and play") }
+        Text(playbackMessage, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+        Text("This screen does not include bundled anime streams. Use your own or licensed direct video URLs.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
     }
 }
